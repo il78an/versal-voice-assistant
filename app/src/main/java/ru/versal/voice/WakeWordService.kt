@@ -7,7 +7,11 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.media.AudioManager
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.os.Build
+import android.os.SystemClock
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -17,6 +21,14 @@ import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.NotificationCompat
 import org.vosk.Model
 import org.vosk.Recognizer
+import com.k2fsa.sherpa.onnx.EndpointConfig
+import com.k2fsa.sherpa.onnx.EndpointRule
+import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OnlineModelConfig
+import com.k2fsa.sherpa.onnx.OnlineRecognizer
+import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OnlineStream
+import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import org.vosk.android.SpeechService
 import org.vosk.android.RecognitionListener
 import java.io.BufferedInputStream
@@ -37,11 +49,15 @@ class WakeWordService : Service() {
         private const val NOTIFICATION_ID = 7001
         private const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
         private const val MODEL_DIR = "vosk-model-small-ru-0.22"
+        private const val SHERPA_MODEL_DIR = "sherpa-onnx-streaming-zipformer-small-ru-vosk-int8-2025-08-16"
+        private const val SHERPA_MODEL_BASE = "https://huggingface.co/csukuangfj/$SHERPA_MODEL_DIR/resolve/main/"
     }
 
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private var model: Model? = null
+    private var commandRecognizer: OnlineRecognizer? = null
+    @Volatile private var commandRecording: AudioRecord? = null
     private var speechService: SpeechService? = null
     private var tts: TextToSpeech? = null
     @Volatile private var stopped = false
@@ -65,6 +81,8 @@ class WakeWordService : Service() {
                 getSharedPreferences(AssistantWidget.PREFS, MODE_PRIVATE).edit().putBoolean(AssistantWidget.KEY_ACTIVE, false).apply()
                 AssistantWidget.refreshAll(this)
                 stopRecognition()
+                try { commandRecording?.stop() } catch (_: Exception) {}
+                commandRecording = null
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
@@ -127,6 +145,15 @@ class WakeWordService : Service() {
             }
             if (stopped) return
             model = Model(modelDir.absolutePath)
+            try {
+                updateNotification("Подготовка нового движка распознавания команд…")
+                prepareSherpaRecognizer()
+            } catch (e: Exception) {
+                // Не блокируем запуск помощника: при недоступности Sherpa команды временно
+                // продолжат распознаваться прежним движком Vosk.
+                commandRecognizer = null
+                android.util.Log.e("VersalWake", "Sherpa model initialization failed; using Vosk fallback", e)
+            }
             main.post {
                 updateNotification("Ожидаю ключевое слово «Помощник»")
                 startWakeRecognition()
@@ -171,6 +198,190 @@ class WakeWordService : Service() {
         }
     }
 
+
+    // Загружаем компактную русскую потоковую модель Sherpa-ONNX один раз.
+    // Файлы хранятся в filesDir и повторно не скачиваются.
+    private fun prepareSherpaRecognizer() {
+        val dir = File(filesDir, SHERPA_MODEL_DIR)
+        dir.mkdirs()
+        val modelFiles = listOf(
+            "encoder.int8.onnx",
+            "decoder.onnx",
+            "joiner.int8.onnx",
+            "tokens.txt",
+            "bpe.model"
+        )
+        modelFiles.forEach { name ->
+            val target = File(dir, name)
+            if (!target.exists() || target.length() < 1024L) {
+                updateNotification("Загрузка модели команд: $name")
+                val temp = File(dir, "$name.download")
+                temp.delete()
+                val connection = (URL(SHERPA_MODEL_BASE + name).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 20000
+                    readTimeout = 120000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", "VersalVoiceAssistant/0.3")
+                }
+                try {
+                    connection.inputStream.use { input ->
+                        FileOutputStream(temp).use { output -> input.copyTo(output) }
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+                if (!temp.exists() || temp.length() < 1024L) {
+                    temp.delete()
+                    throw IllegalStateException("Не удалось загрузить файл модели Sherpa: $name")
+                }
+                target.delete()
+                if (!temp.renameTo(target)) {
+                    temp.copyTo(target, overwrite = true)
+                    temp.delete()
+                }
+            }
+        }
+
+        val modelConfig = OnlineModelConfig(
+            transducer = OnlineTransducerModelConfig(
+                encoder = File(dir, "encoder.int8.onnx").absolutePath,
+                decoder = File(dir, "decoder.onnx").absolutePath,
+                joiner = File(dir, "joiner.int8.onnx").absolutePath
+            ),
+            tokens = File(dir, "tokens.txt").absolutePath,
+            numThreads = 2,
+            provider = "cpu",
+            modelType = "zipformer2",
+            modelingUnit = "bpe",
+            bpeVocab = File(dir, "bpe.model").absolutePath
+        )
+        val config = OnlineRecognizerConfig(
+            featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+            modelConfig = modelConfig,
+            endpointConfig = EndpointConfig(
+                rule1 = EndpointRule(false, 1.2f, 0.0f),
+                rule2 = EndpointRule(true, 0.7f, 0.0f),
+                rule3 = EndpointRule(false, 0.0f, 8.0f)
+            ),
+            enableEndpoint = true
+        )
+        commandRecognizer = OnlineRecognizer(config = config)
+    }
+
+    // Потоковое распознавание команды с микрофона через Sherpa-ONNX.
+    private fun recognizeCommandWithSherpa() {
+        var phrase = ""
+        var recorder: AudioRecord? = null
+        var stream: OnlineStream? = null
+        try {
+            val recognizer = commandRecognizer ?: throw IllegalStateException("Sherpa-ONNX не инициализирован")
+            val minBytes = AudioRecord.getMinBufferSize(
+                16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            if (minBytes <= 0) throw IllegalStateException("Недоступен аудиовход 16 кГц")
+            recorder = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                16000,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(minBytes * 2, 6400)
+            )
+            if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+                throw IllegalStateException("Не удалось инициализировать микрофон для Sherpa")
+            }
+            commandRecording = recorder
+            stream = recognizer.createStream()
+            recorder.startRecording()
+            updateNotification("Слушаю команду — Sherpa-ONNX")
+            val buffer = ShortArray(1600) // 100 мс при 16 кГц
+            val deadline = SystemClock.elapsedRealtime() + 9000L
+            while (!stopped && handlingCommand && SystemClock.elapsedRealtime() < deadline) {
+                val count = recorder.read(buffer, 0, buffer.size)
+                if (count > 0) {
+                    val samples = FloatArray(count) { buffer[it] / 32768.0f }
+                    stream.acceptWaveform(samples, sampleRate = 16000)
+                    while (recognizer.isReady(stream)) recognizer.decode(stream)
+                    if (recognizer.isEndpoint(stream)) {
+                        phrase = recognizer.getResult(stream).text.trim()
+                        if (phrase.isNotBlank()) break
+                        recognizer.reset(stream)
+                    }
+                } else if (count < 0) {
+                    throw IllegalStateException("Ошибка чтения микрофона: $count")
+                }
+            }
+            if (phrase.isBlank() && !stopped) {
+                stream.inputFinished()
+                while (recognizer.isReady(stream)) recognizer.decode(stream)
+                phrase = recognizer.getResult(stream).text.trim()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("VersalWake", "Sherpa command recognition failed", e)
+        } finally {
+            commandRecording = null
+            try { recorder?.stop() } catch (_: Exception) {}
+            try { recorder?.release() } catch (_: Exception) {}
+            try { stream?.release() } catch (_: Exception) {}
+            if (!stopped) {
+                main.post {
+                    restoreMusicVolume()
+                    if (phrase.isNotBlank()) executeCommand(phrase)
+                    else updateNotification("Команда не распознана. Повторите после слова «Помощник»")
+                    handlingCommand = false
+                    main.postDelayed({ startWakeRecognition() }, 900)
+                }
+            }
+        }
+    }
+
+    // Резервный путь: если модель Sherpa не загрузилась, сохраняем прежнее распознавание Vosk.
+    private fun startVoskCommandListening() {
+        try {
+            val loadedModel = model ?: throw IllegalStateException("Модель Vosk ещё не загружена")
+            val recognizer = Recognizer(loadedModel, 16000.0f)
+            val service = SpeechService(recognizer, 16000.0f)
+            speechService = service
+            var processed = false
+            service.startListening(object : RecognitionListener {
+                private fun process(hypothesis: String?) {
+                    if (processed || stopped) return
+                    val phrase = extractText(hypothesis.orEmpty())
+                    if (phrase.isBlank()) return
+                    processed = true
+                    main.post {
+                        restoreMusicVolume()
+                        executeCommand(phrase)
+                        main.postDelayed({
+                            handlingCommand = false
+                            startWakeRecognition()
+                        }, 900)
+                    }
+                }
+                override fun onPartialResult(hypothesis: String?) {}
+                override fun onResult(hypothesis: String?) { process(hypothesis) }
+                override fun onFinalResult(hypothesis: String?) {
+                    process(hypothesis)
+                    if (!processed && !stopped) main.post {
+                        restoreMusicVolume()
+                        handlingCommand = false
+                        startWakeRecognition()
+                    }
+                }
+                override fun onError(exception: Exception?) {
+                    if (!stopped) main.post { restoreMusicVolume(); handlingCommand = false; startWakeRecognition() }
+                }
+                override fun onTimeout() {
+                    if (!stopped) main.post { restoreMusicVolume(); handlingCommand = false; startWakeRecognition() }
+                }
+            }, 9000)
+        } catch (e: Exception) {
+            android.util.Log.e("VersalWake", "Vosk fallback command recognition failed", e)
+            restoreMusicVolume()
+            handlingCommand = false
+            startWakeRecognition()
+        }
+    }
+
     private fun beginCommand() {
         if (handlingCommand || stopped) return
         handlingCommand = true
@@ -179,54 +390,13 @@ class WakeWordService : Service() {
         val params = android.os.Bundle().apply { putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "wake") }
         val startCommandListening = {
             if (!stopped) {
-                try {
-                    duckMusicVolume()
-                    val loadedModel = model ?: throw IllegalStateException("Модель ещё не загружена")
-                    val recognizer = Recognizer(loadedModel, 16000.0f)
-                    val service = SpeechService(recognizer, 16000.0f)
-                    speechService = service
-                    var processed = false
-                    val listener = object : RecognitionListener {
-                        private fun process(hypothesis: String?) {
-                            if (processed || stopped) return
-                            val phrase = extractText(hypothesis.orEmpty())
-                            if (phrase.isBlank()) return
-                            processed = true
-                            main.post {
-                                restoreMusicVolume()
-                                executeCommand(phrase)
-                                main.postDelayed({
-                                    handlingCommand = false
-                                    startWakeRecognition()
-                                }, 900)
-                            }
-                        }
-                        override fun onPartialResult(hypothesis: String?) {}
-                        // onResult содержит завершённую распознанную фразу Vosk.
-                        override fun onResult(hypothesis: String?) { process(hypothesis) }
-                        override fun onFinalResult(hypothesis: String?) {
-                            process(hypothesis)
-                            if (!processed && !stopped) {
-                                main.post {
-                                    restoreMusicVolume()
-                                    handlingCommand = false
-                                    startWakeRecognition()
-                                }
-                            }
-                        }
-                        override fun onError(exception: Exception?) {
-                            if (!stopped) main.post { restoreMusicVolume(); handlingCommand = false; startWakeRecognition() }
-                        }
-                        override fun onTimeout() {
-                            if (!stopped) main.post { restoreMusicVolume(); handlingCommand = false; startWakeRecognition() }
-                        }
-                    }
-                    service.startListening(listener, 9000)
-                } catch (e: Exception) {
-                    android.util.Log.e("VersalWake", "Command recognition failed", e)
-                    restoreMusicVolume()
-                    handlingCommand = false
-                    startWakeRecognition()
+                duckMusicVolume()
+                if (commandRecognizer != null) {
+                    updateNotification("Запуск Sherpa-ONNX — слушаю команду")
+                    worker.execute { recognizeCommandWithSherpa() }
+                } else {
+                    updateNotification("Sherpa недоступен — резервное распознавание Vosk")
+                    startVoskCommandListening()
                 }
             }
         }
@@ -398,6 +568,10 @@ class WakeWordService : Service() {
         getSharedPreferences(AssistantWidget.PREFS, MODE_PRIVATE).edit().putBoolean(AssistantWidget.KEY_ACTIVE, false).apply()
         AssistantWidget.refreshAll(this)
         stopRecognition()
+        try { commandRecording?.stop() } catch (_: Exception) {}
+        commandRecording = null
+        commandRecognizer?.release()
+        commandRecognizer = null
         model?.close()
         model = null
         tts?.stop()
