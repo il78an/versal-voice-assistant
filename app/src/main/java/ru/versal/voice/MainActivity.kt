@@ -106,9 +106,16 @@ class MainActivity : Activity() {
             isAllCaps = false
             setOnClickListener { openMusic() }
         })
+        root.addView(Button(this).apply {
+            text = "Открыть YouTube"
+            isAllCaps = false
+            setOnClickListener { openYouTube() }
+        })
         root.addView(text(
             "Команды: открой/закрой Яндекс Музыку; включи/останови музыку; " +
-                "следующий/предыдущий трек; громкость 30 (уровень в процентах).\n\n" +
+                "следующий/предыдущий трек; громкость 30 (уровень в процентах). " +
+                "Для YouTube: открой/закрой YouTube, пауза, продолжи видео, следующее/предыдущее видео. " +
+                "Когда YouTube открыт, команды «дальше» и «назад» переключают Shorts.\n\n" +
                 "Фоновый режим: включите его кнопкой ниже. При первом запуске загрузятся офлайн-модели Vosk и Sherpa-ONNX (~75 МБ). " +
                 "Слово «Помощник» распознаёт Vosk, команды — Sherpa-ONNX. После запуска служба ожидает слово «Помощник» при выключенном экране.",
             14f, 0xFFD0D8E5.toInt()
@@ -186,6 +193,15 @@ class MainActivity : Activity() {
         val s = raw.lowercase().replace("ё", "е").replace(Regex("[^а-яa-z0-9 ]"), " ")
             .replace(Regex("\\s+"), " ").trim()
         when {
+            (s.contains("закрой") || s.contains("сверни")) && (s.contains("youtube") || s.contains("ютуб")) -> {
+                media(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                AssistantAccessibilityService.goHome()
+            }
+            s.contains("открой") && (s.contains("youtube") || s.contains("ютуб")) -> openYouTube()
+            (s.contains("следующ") || s.contains("дальше")) && AssistantAccessibilityService.isYouTubeForeground() ->
+                AssistantAccessibilityService.swipeShort(true)
+            (s.contains("предыдущ") || s.contains("назад")) && AssistantAccessibilityService.isYouTubeForeground() ->
+                AssistantAccessibilityService.swipeShort(false)
             s.contains("открой") && (s.contains("яндекс") || s.contains("музык")) -> openMusic()
             (s.contains("закрой") || s.contains("выключи приложение")) &&
                 (s.contains("яндекс") || s.contains("музык")) -> {
@@ -219,6 +235,12 @@ class MainActivity : Activity() {
         val steps = kotlin.math.max(1, kotlin.math.round(max * kotlin.math.abs(percent) / 100f).toInt())
         audio.setStreamVolume(AudioManager.STREAM_MUSIC,
             (current + if (percent > 0) steps else -steps).coerceIn(0, max), 0)
+    }
+
+    private fun openYouTube() {
+        val launch = packageManager.getLaunchIntentForPackage("com.google.android.youtube")
+        if (launch != null) startActivity(launch)
+        else Toast.makeText(this, "YouTube не найден", Toast.LENGTH_LONG).show()
     }
 
     private fun openMusic() {
