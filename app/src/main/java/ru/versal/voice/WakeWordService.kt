@@ -293,15 +293,18 @@ class WakeWordService : Service() {
         val isStop = listOf("останов", "выключи музыку", "поставь на паузу", "пауза").any { s.contains(it) }
         val isPrevious = listOf("предыдущ", "прошлый трек", "предыдущую песню", "назад").any { s.contains(it) }
         val isNext = listOf("следующ", "дальше").any { s.contains(it) }
-        val isVolume = s.contains("громк") || s.contains("уровень звука") || s.contains("звук на")
+        val isVolume = s.contains("громк") || s.contains("уровень звука") || s.contains("звук на") || s.startsWith("звук ")
         val volume = if (isVolume) parseVolumePercent(s) else null
         when {
             isClose && mentionsYandexMusic -> {
                 media(KeyEvent.KEYCODE_MEDIA_PAUSE)
                 main.postDelayed({
-                    startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }, 250)
-                updateNotification("Яндекс Музыка остановлена и свернута")
+                    val moved = AssistantAccessibilityService.goHome()
+                    updateNotification(
+                        if (moved) "Яндекс Музыка остановлена и свернута"
+                        else "Музыка остановлена. Включите службу Версаль в настройках специальных возможностей"
+                    )
+                }, 350)
             }
             s.contains("открой") && mentionsYandexMusic -> {
                 val launch = packageManager.getLaunchIntentForPackage("ru.yandex.music")
@@ -311,7 +314,14 @@ class WakeWordService : Service() {
             isPrevious -> { media(KeyEvent.KEYCODE_MEDIA_PREVIOUS); updateNotification("Предыдущий трек") }
             isNext -> { media(KeyEvent.KEYCODE_MEDIA_NEXT); updateNotification("Следующий трек") }
             isStop -> { media(KeyEvent.KEYCODE_MEDIA_PAUSE); updateNotification("Музыка остановлена") }
-            isVolume && volume != null -> { setVolumePercent(volume); updateNotification("Громкость установлена: $volume%") }
+            isVolume && volume != null -> {
+                val actual = setVolumePercent(volume)
+                updateNotification(
+                    if (actual == volume) "Громкость установлена: $actual%"
+                    else "Запрошено $volume%, фактически установлено $actual%"
+                )
+            }
+            isVolume -> updateNotification("Не удалось определить число в команде: $raw")
             s.contains("включи") || s.contains("запусти") || s == "играй" -> { media(KeyEvent.KEYCODE_MEDIA_PLAY); updateNotification("Воспроизведение запущено") }
             else -> updateNotification("Не распознана команда: $raw")
         }
@@ -336,11 +346,19 @@ class WakeWordService : Service() {
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
     }
 
-    private fun setVolumePercent(percent: Int) {
+    private fun setVolumePercent(percent: Int): Int {
         val audio = getSystemService(AUDIO_SERVICE) as AudioManager
         val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        val target = kotlin.math.round(max * percent.coerceIn(0, 100) / 100f).toInt()
-        audio.setStreamVolume(AudioManager.STREAM_MUSIC, target.coerceIn(0, max), 0)
+        val target = kotlin.math.round(max * percent.coerceIn(0, 100) / 100f).toInt().coerceIn(0, max)
+        return try {
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, AudioManager.FLAG_SHOW_UI)
+            val actual = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+            if (max == 0) 0 else kotlin.math.round(actual * 100f / max).toInt()
+        } catch (e: Exception) {
+            android.util.Log.e("VersalWake", "Could not set music volume", e)
+            val actual = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+            if (max == 0) 0 else kotlin.math.round(actual * 100f / max).toInt()
+        }
     }
 
     private fun stopRecognition() {
