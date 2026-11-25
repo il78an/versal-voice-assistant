@@ -459,7 +459,7 @@ class WakeWordService : Service() {
             .replace(Regex("[^а-яa-z0-9\\s-]"), " ")
             .replace(Regex("\\s+"), " ").trim()
         val mentionsYandexMusic = s.contains("яндекс") || s.contains("музык")
-        val mentionsYouTube = s.contains("youtube") || s.contains("ютуб") || s.contains("ютьюб")
+        val mentionsYouTube = s.contains("youtube") || s.contains("ютуб") || s.contains("ютьюб") || s.contains("ютюб")
         val youtubeIsActive = AssistantAccessibilityService.isYouTubeForeground()
         val isClose = listOf("закрой", "закрыть", "сверни", "выход").any { s.contains(it) }
         val isStop = listOf("останов", "выключи музыку", "поставь на паузу", "пауза").any { s.contains(it) }
@@ -478,7 +478,7 @@ class WakeWordService : Service() {
                     )
                 }, 350)
             }
-            s.contains("открой") && mentionsYouTube -> {
+            (s.contains("открой") || s.contains("открыть") || s.contains("открыва") || s.contains("запусти")) && mentionsYouTube -> {
                 val launch = packageManager.getLaunchIntentForPackage("com.google.android.youtube")
                 if (launch != null) { launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(launch) }
                 updateNotification(if (launch != null) "Открываю YouTube" else "Не найдено приложение YouTube")
@@ -493,25 +493,35 @@ class WakeWordService : Service() {
                     )
                 }, 350)
             }
-            s.contains("открой") && mentionsYandexMusic -> {
+            (s.contains("открой") || s.contains("открыть") || s.contains("открыва") || s.contains("запусти")) && mentionsYandexMusic -> {
                 val launch = packageManager.getLaunchIntentForPackage("ru.yandex.music")
                 if (launch != null) { launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(launch) }
                 updateNotification(if (launch != null) "Открываю Яндекс Музыку" else "Не найдено приложение Яндекс Музыка")
             }
+            isPrevious && mentionsYouTube -> {
+                val sent = AssistantAccessibilityService.swipeShort(false)
+                updateNotification(if (sent) "Предыдущий Short" else "Не удалось переключить Short: откройте YouTube и включите службу «Версаль» в специальных возможностях")
+            }
+            isNext && mentionsYouTube -> {
+                val sent = AssistantAccessibilityService.swipeShort(true)
+                updateNotification(if (sent) "Следующий Short" else "Не удалось переключить Short: откройте YouTube и включите службу «Версаль» в специальных возможностях")
+            }
             isPrevious && youtubeIsActive -> {
                 val sent = AssistantAccessibilityService.swipeShort(false)
-                updateNotification(if (sent) "Предыдущий Short" else "Не удалось переключить Short — проверьте службу специальных возможностей")
+                updateNotification(if (sent) "Предыдущий Short" else "Не удалось переключить Short")
             }
             isNext && youtubeIsActive -> {
                 val sent = AssistantAccessibilityService.swipeShort(true)
-                updateNotification(if (sent) "Следующий Short" else "Не удалось переключить Short — проверьте службу специальных возможностей")
+                updateNotification(if (sent) "Следующий Short" else "Не удалось переключить Short")
             }
             isPrevious -> { media(KeyEvent.KEYCODE_MEDIA_PREVIOUS); updateNotification("Предыдущий трек") }
             isNext -> { media(KeyEvent.KEYCODE_MEDIA_NEXT); updateNotification("Следующий трек") }
-            isStop -> {
-                media(KeyEvent.KEYCODE_MEDIA_PAUSE)
-                updateNotification(if (youtubeIsActive) "Видео YouTube на паузе" else "Музыка остановлена")
+            isStop && youtubeIsActive -> {
+                val clicked = AssistantAccessibilityService.pauseYouTube()
+                if (!clicked) media(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                updateNotification(if (clicked) "Видео YouTube остановлено" else "Отправлена команда паузы YouTube")
             }
+            isStop -> { media(KeyEvent.KEYCODE_MEDIA_PAUSE); updateNotification("Музыка остановлена") }
             isVolume && volume != null -> {
                 val actual = setVolumePercent(volume)
                 updateNotification(
@@ -520,7 +530,15 @@ class WakeWordService : Service() {
                 )
             }
             isVolume -> updateNotification("Не удалось определить число в команде: $raw")
-            s.contains("включи") || s.contains("запусти") || s == "играй" || s.contains("продолжи") -> { media(KeyEvent.KEYCODE_MEDIA_PLAY); updateNotification(if (youtubeIsActive) "Видео YouTube продолжено" else "Воспроизведение запущено") }
+            (s.contains("включи") || s.contains("запусти") || s == "играй" || s.contains("продолжи")) && youtubeIsActive -> {
+                val clicked = AssistantAccessibilityService.playYouTube()
+                if (!clicked) media(KeyEvent.KEYCODE_MEDIA_PLAY)
+                updateNotification(if (clicked) "Видео YouTube продолжено" else "Отправлена команда воспроизведения YouTube")
+            }
+            s.contains("включи") || s.contains("запусти") || s == "играй" || s.contains("продолжи") -> {
+                media(KeyEvent.KEYCODE_MEDIA_PLAY)
+                updateNotification("Воспроизведение запущено")
+            }
             else -> updateNotification("Не распознана команда: $raw")
         }
     }
