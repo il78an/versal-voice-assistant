@@ -59,6 +59,8 @@ class WakeWordService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 stopped = true
+                getSharedPreferences(AssistantWidget.PREFS, MODE_PRIVATE).edit().putBoolean(AssistantWidget.KEY_ACTIVE, false).apply()
+                AssistantWidget.refreshAll(this)
                 stopRecognition()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -66,6 +68,8 @@ class WakeWordService : Service() {
             }
             ACTION_START -> {
                 stopped = false
+                getSharedPreferences(AssistantWidget.PREFS, MODE_PRIVATE).edit().putBoolean(AssistantWidget.KEY_ACTIVE, true).apply()
+                AssistantWidget.refreshAll(this)
                 startForeground(NOTIFICATION_ID, notification("Подготовка офлайн-модели…"))
                 worker.execute { prepareModelAndListen() }
             }
@@ -302,6 +306,8 @@ class WakeWordService : Service() {
 
     override fun onDestroy() {
         stopped = true
+        getSharedPreferences(AssistantWidget.PREFS, MODE_PRIVATE).edit().putBoolean(AssistantWidget.KEY_ACTIVE, false).apply()
+        AssistantWidget.refreshAll(this)
         stopRecognition()
         model?.close()
         model = null
