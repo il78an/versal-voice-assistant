@@ -46,6 +46,8 @@ class WakeWordService : Service() {
     private var tts: TextToSpeech? = null
     @Volatile private var stopped = false
     @Volatile private var handlingCommand = false
+    private var previousMusicVolume: Int? = null
+    private var volumeRestoreTask: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -177,6 +179,7 @@ class WakeWordService : Service() {
         val startCommandListening = {
             if (!stopped) {
                 try {
+                    duckMusicVolume()
                     val loadedModel = model ?: throw IllegalStateException("Модель ещё не загружена")
                     val recognizer = Recognizer(loadedModel, 16000.0f)
                     val service = SpeechService(recognizer, 16000.0f)
@@ -188,30 +191,38 @@ class WakeWordService : Service() {
                             val phrase = extractText(hypothesis.orEmpty())
                             if (phrase.isBlank()) return
                             processed = true
-                            executeCommand(phrase)
-                            main.postDelayed({
-                                handlingCommand = false
-                                startWakeRecognition()
-                            }, 900)
+                            main.post {
+                                restoreMusicVolume()
+                                executeCommand(phrase)
+                                main.postDelayed({
+                                    handlingCommand = false
+                                    startWakeRecognition()
+                                }, 900)
+                            }
                         }
                         override fun onPartialResult(hypothesis: String?) {}
                         override fun onResult(hypothesis: String?) = process(hypothesis)
                         override fun onFinalResult(hypothesis: String?) {
                             process(hypothesis)
                             if (!processed && !stopped) {
-                                main.postDelayed({ handlingCommand = false; startWakeRecognition() }, 500)
+                                main.post {
+                                    restoreMusicVolume()
+                                    handlingCommand = false
+                                    startWakeRecognition()
+                                }
                             }
                         }
                         override fun onError(exception: Exception?) {
-                            if (!stopped) main.post { handlingCommand = false; startWakeRecognition() }
+                            if (!stopped) main.post { restoreMusicVolume(); handlingCommand = false; startWakeRecognition() }
                         }
                         override fun onTimeout() {
-                            if (!stopped) main.post { handlingCommand = false; startWakeRecognition() }
+                            if (!stopped) main.post { restoreMusicVolume(); handlingCommand = false; startWakeRecognition() }
                         }
                     }
                     service.startListening(listener, 9000)
                 } catch (e: Exception) {
                     android.util.Log.e("VersalWake", "Command recognition failed", e)
+                    restoreMusicVolume()
                     handlingCommand = false
                     startWakeRecognition()
                 }
@@ -231,6 +242,40 @@ class WakeWordService : Service() {
             tts?.speak("Слушаю вас", TextToSpeech.QUEUE_FLUSH, params, "wake")
         } else {
             main.postDelayed({ startCommandListening() }, 700)
+        }
+    }
+
+    // Приглушаем музыку на время прослушивания команды и обязательно возвращаем исходный уровень.
+    private fun duckMusicVolume() {
+        restoreMusicVolume()
+        val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+        val original = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        previousMusicVolume = original
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, (original / 2).coerceAtLeast(0), 0)
+        val task = Runnable {
+            restoreMusicVolume()
+            if (handlingCommand && !stopped) {
+                stopRecognition()
+                handlingCommand = false
+                startWakeRecognition()
+            }
+        }
+        volumeRestoreTask = task
+        main.postDelayed(task, 5000)
+    }
+
+    private fun restoreMusicVolume() {
+        volumeRestoreTask?.let { main.removeCallbacks(it) }
+        volumeRestoreTask = null
+        val original = previousMusicVolume
+        previousMusicVolume = null
+        if (original != null) {
+            try {
+                val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, original, 0)
+            } catch (e: Exception) {
+                android.util.Log.w("VersalWake", "Could not restore music volume", e)
+            }
         }
     }
 
