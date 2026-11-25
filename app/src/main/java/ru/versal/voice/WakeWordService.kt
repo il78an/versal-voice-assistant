@@ -135,7 +135,7 @@ class WakeWordService : Service() {
         try {
             stopRecognition()
             val loadedModel = model ?: return
-            val recognizer = Recognizer(loadedModel, 16000.0f, "[\\"помощник\\"]")
+            val recognizer = Recognizer(loadedModel, 16000.0f, """["помощник"]""")
             val service = SpeechService(recognizer, 16000.0f)
             speechService = service
             service.startListening(object : RecognitionListener {
