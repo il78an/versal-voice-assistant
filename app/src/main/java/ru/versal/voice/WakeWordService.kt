@@ -146,17 +146,19 @@ class WakeWordService : Service() {
             val service = SpeechService(recognizer, 16000.0f)
             speechService = service
             service.startListening(object : RecognitionListener {
-                override fun onPartialResult(hypothesis: String?) {
-                    if (!stopped && hypothesis.orEmpty().contains("помощник", ignoreCase = true)) {
-                        beginCommand()
-                    }
-                }
-                override fun onResult(hypothesis: String?) {
-                    if (!stopped && hypothesis.orEmpty().contains("помощник", ignoreCase = true)) beginCommand()
-                }
+                // Не реагируем на промежуточные гипотезы: музыка и шум часто дают ложные совпадения.
+                override fun onPartialResult(hypothesis: String?) {}
+                override fun onResult(hypothesis: String?) {}
                 override fun onFinalResult(hypothesis: String?) {
-                    if (!stopped && hypothesis.orEmpty().contains("помощник", ignoreCase = true)) beginCommand()
-                    else if (!stopped && !handlingCommand) main.post { startWakeRecognition() }
+                    val text = extractText(hypothesis.orEmpty())
+                        .lowercase(Locale.ROOT)
+                        .replace("ё", "е")
+                        .trim()
+                    if (!stopped && text.split(Regex("\\s+")).any { it == "помощник" }) {
+                        beginCommand()
+                    } else if (!stopped && !handlingCommand) {
+                        main.post { startWakeRecognition() }
+                    }
                 }
                 override fun onError(exception: Exception?) {
                     if (!stopped && !handlingCommand) main.postDelayed({ startWakeRecognition() }, 1200)
@@ -202,7 +204,8 @@ class WakeWordService : Service() {
                             }
                         }
                         override fun onPartialResult(hypothesis: String?) {}
-                        override fun onResult(hypothesis: String?) = process(hypothesis)
+                        // Не исполняем команду по промежуточному фрагменту.
+                        override fun onResult(hypothesis: String?) {}
                         override fun onFinalResult(hypothesis: String?) {
                             process(hypothesis)
                             if (!processed && !stopped) {
@@ -285,24 +288,42 @@ class WakeWordService : Service() {
     }
 
     private fun executeCommand(raw: String) {
-        val s = raw.lowercase(Locale.ROOT).replace("ё", "е")
+        val s = raw.lowercase(Locale.ROOT)
+            .replace("ё", "е")
+            .replace(Regex("[^а-яa-z0-9\\s-]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        val mentionsYandexMusic = s.contains("яндекс") || s.contains("музык")
+        val isClose = listOf("закрой", "закрыть", "сверни", "выход").any { s.contains(it) }
+        val isStop = listOf("останов", "выключи музыку", "поставь на паузу", "пауза").any { s.contains(it) }
+        val isPrevious = listOf("предыдущ", "прошлый трек", "предыдущую песню", "назад").any { s.contains(it) }
+        val isNext = listOf("следующ", "дальше").any { s.contains(it) }
+        val isVolumeUp = listOf("плюс", "увелич", "громче", "прибав").any { s.contains(it) }
+        val isVolumeDown = listOf("минус", "уменьш", "тише", "убав").any { s.contains(it) }
+        val volumeCommand = s.contains("громк") || isVolumeUp || isVolumeDown
+        val ten = s.contains("десять") || Regex("\\b10\\b").containsMatchIn(s)
+
         when {
-            s.contains("открой") && (s.contains("яндекс") || s.contains("музык")) -> {
-                packageManager.getLaunchIntentForPackage("ru.yandex.music")?.let { it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(it) }
-            }
-            (s.contains("закрой") || s.contains("выключи приложение")) && (s.contains("яндекс") || s.contains("музык")) -> {
+            isClose && mentionsYandexMusic -> {
                 media(KeyEvent.KEYCODE_MEDIA_PAUSE)
                 val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(home)
             }
-            s.contains("следующ") || s.contains("дальше") -> media(KeyEvent.KEYCODE_MEDIA_NEXT)
-            s.contains("предыдущ") || s.contains("прошлый трек") -> media(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-            s.contains("останов") || s.contains("пауза") -> media(KeyEvent.KEYCODE_MEDIA_PAUSE)
-            s.contains("включи") || s.contains("запусти") || s.trim() == "играй" -> media(KeyEvent.KEYCODE_MEDIA_PLAY)
-            s.contains("громк") && (s.contains("плюс") || s.contains("увелич")) -> changeVolume(if (s.contains("десять") || s.contains("10")) 10 else 5)
-            s.contains("громк") && (s.contains("минус") || s.contains("уменьш")) -> changeVolume(if (s.contains("десять") || s.contains("10")) -10 else -5)
+            s.contains("открой") && mentionsYandexMusic -> {
+                packageManager.getLaunchIntentForPackage("ru.yandex.music")?.let {
+                    it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(it)
+                }
+            }
+            isPrevious -> media(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            isNext -> media(KeyEvent.KEYCODE_MEDIA_NEXT)
+            isStop -> media(KeyEvent.KEYCODE_MEDIA_PAUSE)
+            volumeCommand && isVolumeUp -> changeVolume(if (ten) 10 else 5)
+            volumeCommand && isVolumeDown -> changeVolume(if (ten) -10 else -5)
+            s.contains("включи") || s.contains("запусти") || s == "играй" -> media(KeyEvent.KEYCODE_MEDIA_PLAY)
         }
-        updateNotification("Команда: $raw · снова жду «Помощник»")
+        updateNotification("Команда распознана: $raw · снова жду «Помощник»")
     }
 
     private fun media(code: Int) {
