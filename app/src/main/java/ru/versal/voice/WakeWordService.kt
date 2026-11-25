@@ -174,7 +174,7 @@ class WakeWordService : Service() {
         val startCommandListening = {
             if (!stopped) {
                 try {
-                    val loadedModel = model ?: return
+                    val loadedModel = model ?: throw IllegalStateException("Модель ещё не загружена")
                     val recognizer = Recognizer(loadedModel, 16000.0f)
                     val service = SpeechService(recognizer, 16000.0f)
                     speechService = service
