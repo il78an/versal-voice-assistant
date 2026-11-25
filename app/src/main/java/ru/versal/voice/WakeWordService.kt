@@ -145,20 +145,21 @@ class WakeWordService : Service() {
             val recognizer = Recognizer(loadedModel, 16000.0f, """["помощник"]""")
             val service = SpeechService(recognizer, 16000.0f)
             speechService = service
+            var wakeWordPartialHits = 0
             service.startListening(object : RecognitionListener {
-                // Не реагируем на промежуточные гипотезы: музыка и шум часто дают ложные совпадения.
-                override fun onPartialResult(hypothesis: String?) {}
+                // Два последовательных совпадения уменьшают ложные срабатывания, но сохраняют быструю реакцию.
+                override fun onPartialResult(hypothesis: String?) {
+                    val partial = extractPartialText(hypothesis.orEmpty()).lowercase(Locale.ROOT).replace("ё", "е").trim()
+                    if (partial.split(Regex("\\s+")).any { it == "помощник" }) {
+                        wakeWordPartialHits++
+                        if (wakeWordPartialHits >= 2 && !stopped) main.post { beginCommand() }
+                    } else wakeWordPartialHits = 0
+                }
                 override fun onResult(hypothesis: String?) {}
                 override fun onFinalResult(hypothesis: String?) {
-                    val text = extractText(hypothesis.orEmpty())
-                        .lowercase(Locale.ROOT)
-                        .replace("ё", "е")
-                        .trim()
-                    if (!stopped && text.split(Regex("\\s+")).any { it == "помощник" }) {
-                        beginCommand()
-                    } else if (!stopped && !handlingCommand) {
-                        main.post { startWakeRecognition() }
-                    }
+                    val text = extractText(hypothesis.orEmpty()).lowercase(Locale.ROOT).replace("ё", "е").trim()
+                    if (!stopped && text.split(Regex("\\s+")).any { it == "помощник" }) beginCommand()
+                    else if (!stopped && !handlingCommand) main.post { startWakeRecognition() }
                 }
                 override fun onError(exception: Exception?) {
                     if (!stopped && !handlingCommand) main.postDelayed({ startWakeRecognition() }, 1200)
@@ -281,6 +282,10 @@ class WakeWordService : Service() {
                 android.util.Log.w("VersalWake", "Could not restore music volume", e)
             }
         }
+    }
+
+    private fun extractPartialText(json: String): String {
+        return try { JSONObject(json).optString("partial", "") } catch (_: Exception) { "" }
     }
 
     private fun extractText(json: String): String {
