@@ -61,6 +61,7 @@ class WakeWordService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 stopped = true
+                restoreMusicVolume()
                 getSharedPreferences(AssistantWidget.PREFS, MODE_PRIVATE).edit().putBoolean(AssistantWidget.KEY_ACTIVE, false).apply()
                 AssistantWidget.refreshAll(this)
                 stopRecognition()
@@ -351,6 +352,7 @@ class WakeWordService : Service() {
 
     override fun onDestroy() {
         stopped = true
+        restoreMusicVolume()
         getSharedPreferences(AssistantWidget.PREFS, MODE_PRIVATE).edit().putBoolean(AssistantWidget.KEY_ACTIVE, false).apply()
         AssistantWidget.refreshAll(this)
         stopRecognition()
