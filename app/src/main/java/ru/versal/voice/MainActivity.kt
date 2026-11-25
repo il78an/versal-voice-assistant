@@ -92,6 +92,11 @@ class MainActivity : Activity() {
             }
         })
         root.addView(Button(this).apply {
+            text = "Настроить виджет 1×1"
+            isAllCaps = false
+            setOnClickListener { startActivity(Intent(this@MainActivity, WidgetConfigActivity::class.java)) }
+        })
+        root.addView(Button(this).apply {
             text = "Открыть Яндекс Музыку"
             isAllCaps = false
             setOnClickListener { openMusic() }
