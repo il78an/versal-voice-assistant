@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <queries><package android:name="ru.yandex.music" /></queries>
     <application
+        android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:label="Версаль — голосовое управление"
         android:theme="@android:style/Theme.Material.NoActionBar"
@@ -18,6 +19,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".WidgetConfigActivity" android:exported="true" />
+        <receiver android:name=".AssistantWidget" android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="ru.versal.voice.WIDGET_TOGGLE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/assistant_widget_info" />
+        </receiver>
         <service
             android:name=".WakeWordService"
             android:exported="false"
