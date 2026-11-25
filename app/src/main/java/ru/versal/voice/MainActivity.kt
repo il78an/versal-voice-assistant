@@ -197,12 +197,16 @@ class MainActivity : Activity() {
                 media(KeyEvent.KEYCODE_MEDIA_PAUSE)
                 AssistantAccessibilityService.goHome()
             }
-            s.contains("открой") && (s.contains("youtube") || s.contains("ютуб")) -> openYouTube()
+            (s.contains("открой") || s.contains("открыть") || s.contains("открыва") || s.contains("запусти")) && (s.contains("youtube") || s.contains("ютуб") || s.contains("ютьюб")) -> openYouTube()
             (s.contains("следующ") || s.contains("дальше")) && AssistantAccessibilityService.isYouTubeForeground() ->
                 AssistantAccessibilityService.swipeShort(true)
             (s.contains("предыдущ") || s.contains("назад")) && AssistantAccessibilityService.isYouTubeForeground() ->
                 AssistantAccessibilityService.swipeShort(false)
-            s.contains("открой") && (s.contains("яндекс") || s.contains("музык")) -> openMusic()
+            (s.contains("останов") || s.contains("пауза")) && AssistantAccessibilityService.isYouTubeForeground() ->
+                AssistantAccessibilityService.pauseYouTube()
+            (s.contains("продолжи") || s.contains("играй") || s.contains("запусти")) && AssistantAccessibilityService.isYouTubeForeground() ->
+                AssistantAccessibilityService.playYouTube()
+            (s.contains("открой") || s.contains("открыть") || s.contains("открыва") || s.contains("запусти")) && (s.contains("яндекс") || s.contains("музык")) -> openMusic()
             (s.contains("закрой") || s.contains("выключи приложение")) &&
                 (s.contains("яндекс") || s.contains("музык")) -> {
                 media(KeyEvent.KEYCODE_MEDIA_PAUSE)
