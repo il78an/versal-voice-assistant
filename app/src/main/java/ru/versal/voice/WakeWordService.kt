@@ -25,6 +25,7 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.zip.ZipInputStream
 
@@ -213,7 +214,7 @@ class WakeWordService : Service() {
         }
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) { if (utteranceId == "wake") main.post(startCommandListening) }
+            override fun onDone(utteranceId: String?) { if (utteranceId == "wake") main.post { startCommandListening() } }
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) { main.post(startCommandListening) }
         })
@@ -221,8 +222,7 @@ class WakeWordService : Service() {
     }
 
     private fun extractText(json: String): String {
-        val match = Regex("\\"text\\\"\\s*:\\s*\\"([^\\"]*)\\"").find(json)
-        return match?.groupValues?.getOrNull(1).orEmpty()
+        return try { JSONObject(json).optString("text", "") } catch (_: Exception) { "" }
     }
 
     private fun executeCommand(raw: String) {
