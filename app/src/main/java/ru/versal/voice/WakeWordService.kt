@@ -461,11 +461,27 @@ class WakeWordService : Service() {
         val mentionsYandexMusic = s.contains("яндекс") || s.contains("музык")
         val isClose = listOf("закрой", "закрыть", "сверни", "выход").any { s.contains(it) }
         val isStop = listOf("останов", "выключи музыку", "поставь на паузу", "пауза").any { s.contains(it) }
+        val isNextShort = s.contains("следующ") && (s.contains("шорт") || s.contains("short"))
+        val isPreviousShort = s.contains("предыдущ") && (s.contains("шорт") || s.contains("short"))
         val isPrevious = listOf("предыдущ", "прошлый трек", "предыдущую песню", "назад").any { s.contains(it) }
         val isNext = listOf("следующ", "дальше").any { s.contains(it) }
         val isVolume = s.contains("громк") || s.contains("уровень звука") || s.contains("звук на") || s.startsWith("звук ")
         val volume = if (isVolume) parseVolumePercent(s) else null
         when {
+            isNextShort -> {
+                val sent = AssistantAccessibilityService.swipeShort(true)
+                updateNotification(
+                    if (sent) "Переключаю на следующий Shorts"
+                    else "Свайп не выполнен: откройте YouTube Shorts и проверьте службу специальных возможностей"
+                )
+            }
+            isPreviousShort -> {
+                val sent = AssistantAccessibilityService.swipeShort(false)
+                updateNotification(
+                    if (sent) "Возвращаю предыдущий Shorts"
+                    else "Свайп не выполнен: откройте YouTube Shorts и проверьте службу специальных возможностей"
+                )
+            }
             isClose && mentionsYandexMusic -> {
                 media(KeyEvent.KEYCODE_MEDIA_PAUSE)
                 main.postDelayed({
