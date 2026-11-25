@@ -220,7 +220,7 @@ class WakeWordService : Service() {
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) { main.post { startCommandListening() } }
         })
-        if (tts == null) main.postDelayed(startCommandListening, 500)
+        if (tts == null) main.postDelayed({ startCommandListening() }, 500)
     }
 
     private fun extractText(json: String): String {
