@@ -145,20 +145,17 @@ class WakeWordService : Service() {
             val recognizer = Recognizer(loadedModel, 16000.0f, """["помощник"]""")
             val service = SpeechService(recognizer, 16000.0f)
             speechService = service
-            var wakeWordPartialHits = 0
             service.startListening(object : RecognitionListener {
-                // Два последовательных совпадения уменьшают ложные срабатывания, но сохраняют быструю реакцию.
-                override fun onPartialResult(hypothesis: String?) {
-                    val partial = extractPartialText(hypothesis.orEmpty()).lowercase(Locale.ROOT).replace("ё", "е").trim()
-                    if (partial.split(Regex("\\s+")).any { it == "помощник" }) {
-                        wakeWordPartialHits++
-                        if (wakeWordPartialHits >= 2 && !stopped) main.post { beginCommand() }
-                    } else wakeWordPartialHits = 0
+                // Ключевое слово проверяем только по завершённому фрагменту, чтобы не реагировать
+                // на промежуточные акустические догадки распознавателя.
+                override fun onPartialResult(hypothesis: String?) {}
+                override fun onResult(hypothesis: String?) {
+                    val text = extractText(hypothesis.orEmpty()).lowercase(Locale.ROOT).replace("ё", "е").trim()
+                    if (!stopped && text.split(Regex("\\s+")).any { it == "помощник" }) main.post { beginCommand() }
                 }
-                override fun onResult(hypothesis: String?) {}
                 override fun onFinalResult(hypothesis: String?) {
                     val text = extractText(hypothesis.orEmpty()).lowercase(Locale.ROOT).replace("ё", "е").trim()
-                    if (!stopped && text.split(Regex("\\s+")).any { it == "помощник" }) beginCommand()
+                    if (!stopped && text.split(Regex("\\s+")).any { it == "помощник" }) main.post { beginCommand() }
                     else if (!stopped && !handlingCommand) main.post { startWakeRecognition() }
                 }
                 override fun onError(exception: Exception?) {
@@ -205,8 +202,8 @@ class WakeWordService : Service() {
                             }
                         }
                         override fun onPartialResult(hypothesis: String?) {}
-                        // Не исполняем команду по промежуточному фрагменту.
-                        override fun onResult(hypothesis: String?) {}
+                        // onResult содержит завершённую распознанную фразу Vosk.
+                        override fun onResult(hypothesis: String?) { process(hypothesis) }
                         override fun onFinalResult(hypothesis: String?) {
                             process(hypothesis)
                             if (!processed && !stopped) {
@@ -257,14 +254,9 @@ class WakeWordService : Service() {
         val original = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         previousMusicVolume = original
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, (original / 2).coerceAtLeast(0), 0)
-        val task = Runnable {
-            restoreMusicVolume()
-            if (handlingCommand && !stopped) {
-                stopRecognition()
-                handlingCommand = false
-                startWakeRecognition()
-            }
-        }
+        // Через 5 секунд возвращаем громкость, но не прерываем распознавание:
+        // у команды есть отдельный таймаут 9 секунд.
+        val task = Runnable { restoreMusicVolume() }
         volumeRestoreTask = task
         main.postDelayed(task, 5000)
     }
