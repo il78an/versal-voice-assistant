@@ -134,7 +134,8 @@ class WakeWordService : Service() {
         if (stopped || handlingCommand) return
         try {
             stopRecognition()
-            val recognizer = Recognizer(model, 16000.0f, "[\\"помощник\\"]")
+            val loadedModel = model ?: return
+            val recognizer = Recognizer(loadedModel, 16000.0f, "[\\"помощник\\"]")
             val service = SpeechService(recognizer, 16000.0f)
             speechService = service
             service.startListening(object : RecognitionListener {
@@ -173,7 +174,8 @@ class WakeWordService : Service() {
         val startCommandListening = {
             if (!stopped) {
                 try {
-                    val recognizer = Recognizer(model, 16000.0f)
+                    val loadedModel = model ?: return
+                    val recognizer = Recognizer(loadedModel, 16000.0f)
                     val service = SpeechService(recognizer, 16000.0f)
                     speechService = service
                     var processed = false
@@ -216,7 +218,7 @@ class WakeWordService : Service() {
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) { if (utteranceId == "wake") main.post { startCommandListening() } }
             @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) { main.post(startCommandListening) }
+            override fun onError(utteranceId: String?) { main.post { startCommandListening() } }
         })
         if (tts == null) main.postDelayed(startCommandListening, 500)
     }
@@ -227,7 +229,6 @@ class WakeWordService : Service() {
 
     private fun executeCommand(raw: String) {
         val s = raw.lowercase(Locale.ROOT).replace("ё", "е")
-        val audio = getSystemService(AUDIO_SERVICE) as AudioManager
         when {
             s.contains("открой") && (s.contains("яндекс") || s.contains("музык")) -> {
                 packageManager.getLaunchIntentForPackage("ru.yandex.music")?.let { it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(it) }
