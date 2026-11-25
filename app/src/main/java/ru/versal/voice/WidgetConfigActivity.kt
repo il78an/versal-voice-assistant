@@ -87,9 +87,14 @@ class WidgetConfigActivity : Activity() {
                     .putInt(AssistantWidget.KEY_BG_ALPHA, bgAlpha)
                     .apply()
                 val manager = AppWidgetManager.getInstance(this@WidgetConfigActivity)
-                AssistantWidget.render(this@WidgetConfigActivity, manager, widgetId)
-                val result = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
-                setResult(RESULT_OK, result)
+                if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+                    AssistantWidget.render(this@WidgetConfigActivity, manager, widgetId)
+                    val result = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+                    setResult(RESULT_OK, result)
+                } else {
+                    AssistantWidget.refreshAll(this@WidgetConfigActivity)
+                    setResult(RESULT_OK)
+                }
                 finish()
             }
         })
