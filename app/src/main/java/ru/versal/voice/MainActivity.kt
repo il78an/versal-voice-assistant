@@ -92,6 +92,11 @@ class MainActivity : Activity() {
             }
         })
         root.addView(Button(this).apply {
+            text = "Разрешить сворачивание приложений"
+            isAllCaps = false
+            setOnClickListener { startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        })
+        root.addView(Button(this).apply {
             text = "Настроить виджет 1×1"
             isAllCaps = false
             setOnClickListener { startActivity(Intent(this@MainActivity, WidgetConfigActivity::class.java)) }
@@ -103,7 +108,7 @@ class MainActivity : Activity() {
         })
         root.addView(text(
             "Команды: открой/закрой Яндекс Музыку; включи/останови музыку; " +
-                "следующий/предыдущий трек; громкость плюс/минус пять или десять.\n\n" +
+                "следующий/предыдущий трек; громкость 30 (уровень в процентах).\n\n" +
                 "Фоновый режим: включите его кнопкой ниже. При первом запуске загрузится офлайн-модель (~45 МБ). " +
                 "После запуска служба ожидает слово «Помощник» при выключенном экране.",
             14f, 0xFFD0D8E5.toInt()
