@@ -32,7 +32,7 @@ class AssistantWidget : AppWidgetProvider() {
             val bgColor = prefs.getInt(KEY_BG_COLOR, Color.rgb(18, 29, 49))
             val bgAlpha = prefs.getInt(KEY_BG_ALPHA, 210)
             val views = RemoteViews(context.packageName, R.layout.assistant_widget)
-            views.setInt(R.id.widget_background, "setBackgroundColor",
+            views.setInt(R.id.widget_root, "setBackgroundColor",
                 Color.argb(bgAlpha, Color.red(bgColor), Color.green(bgColor), Color.blue(bgColor)))
             views.setInt(R.id.widget_icon, "setColorFilter", iconColor)
             views.setInt(R.id.widget_icon, "setImageAlpha", iconAlpha)
