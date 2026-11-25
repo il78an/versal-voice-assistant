@@ -170,7 +170,6 @@ class WakeWordService : Service() {
         stopRecognition()
         updateNotification("Помощник активирован — слушаю команду")
         val params = android.os.Bundle().apply { putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "wake") }
-        tts?.speak("Слушаю вас", TextToSpeech.QUEUE_FLUSH, params, "wake")
         val startCommandListening = {
             if (!stopped) {
                 try {
@@ -214,13 +213,21 @@ class WakeWordService : Service() {
                 }
             }
         }
-        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) { if (utteranceId == "wake") main.post { startCommandListening() } }
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) { main.post { startCommandListening() } }
-        })
-        if (tts == null) main.postDelayed({ startCommandListening() }, 500)
+        if (tts != null) {
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) {
+                    if (utteranceId == "wake") main.post { startCommandListening() }
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    if (utteranceId == "wake") main.post { startCommandListening() }
+                }
+            })
+            tts?.speak("Слушаю вас", TextToSpeech.QUEUE_FLUSH, params, "wake")
+        } else {
+            main.postDelayed({ startCommandListening() }, 700)
+        }
     }
 
     private fun extractText(json: String): String {
