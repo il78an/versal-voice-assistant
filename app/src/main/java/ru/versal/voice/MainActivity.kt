@@ -16,6 +16,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.os.Build
 
 class MainActivity : Activity() {
     private var speech: SpeechRecognizer? = null
@@ -78,6 +79,19 @@ class MainActivity : Activity() {
         }
         root.addView(continuousButton)
         root.addView(Button(this).apply {
+            text = "▶ Включить фоновое ожидание «Помощник»"
+            isAllCaps = false
+            setOnClickListener { startBackgroundAssistant() }
+        })
+        root.addView(Button(this).apply {
+            text = "■ Остановить фоновое ожидание"
+            isAllCaps = false
+            setOnClickListener {
+                startService(Intent(this@MainActivity, WakeWordService::class.java).setAction(WakeWordService.ACTION_STOP))
+                status.text = "Фоновое ожидание остановлено"
+            }
+        })
+        root.addView(Button(this).apply {
             text = "Открыть Яндекс Музыку"
             isAllCaps = false
             setOnClickListener { openMusic() }
@@ -85,11 +99,27 @@ class MainActivity : Activity() {
         root.addView(text(
             "Команды: открой/закрой Яндекс Музыку; включи/останови музыку; " +
                 "следующий/предыдущий трек; громкость плюс/минус пять или десять.\n\n" +
-                "Фоновое пробуждение по слову «Помощник» будет следующим этапом. " +
-                "Текущий непрерывный режим работает только пока приложение открыто.",
+                "Фоновый режим: включите его кнопкой ниже. При первом запуске загрузится офлайн-модель (~45 МБ). " +
+                "После запуска служба ожидает слово «Помощник» при выключенном экране.",
             14f, 0xFFD0D8E5.toInt()
         ))
         setContentView(ScrollView(this).apply { addView(root) })
+    }
+
+    private fun startBackgroundAssistant() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), requestAudio)
+            Toast.makeText(this, "Разрешите доступ к микрофону и нажмите кнопку ещё раз", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val serviceIntent = Intent(this, WakeWordService::class.java).setAction(WakeWordService.ACTION_START)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+            else startService(serviceIntent)
+            status.text = "Запускаю фоновое ожидание…"
+        } catch (e: Exception) {
+            status.text = "Не удалось запустить фоновый режим: " + e.message
+        }
     }
 
     private fun startRecognition(loop: Boolean) {
