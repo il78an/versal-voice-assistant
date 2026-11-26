@@ -2,7 +2,7 @@ name: Android debug APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'feature/shorts-swipe-from-build50' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
