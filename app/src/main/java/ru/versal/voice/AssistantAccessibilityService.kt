@@ -36,7 +36,6 @@ class AssistantAccessibilityService : AccessibilityService() {
 
     private fun swipeShortInternal(next: Boolean): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false
-        // Do not send gestures outside the YouTube app.
         if (foregroundPackage != "com.google.android.youtube") return false
 
         val metrics = resources.displayMetrics
