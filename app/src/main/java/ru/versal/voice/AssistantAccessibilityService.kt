@@ -3,6 +3,8 @@ package ru.versal.voice
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.media.AudioManager
+import android.view.KeyEvent
 import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 
@@ -19,6 +21,15 @@ class AssistantAccessibilityService : AccessibilityService() {
             val service = instance ?: return false
             return service.swipeShortInternal(next)
         }
+
+        fun isYouTubeForeground(): Boolean =
+            instance?.foregroundPackage == "com.google.android.youtube"
+
+        fun pauseYouTube(): Boolean =
+            instance?.dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PAUSE) ?: false
+
+        fun playYouTube(): Boolean =
+            instance?.dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY) ?: false
     }
 
     @Volatile private var foregroundPackage: String? = null
@@ -31,6 +42,19 @@ class AssistantAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString()
         if (!pkg.isNullOrBlank()) foregroundPackage = pkg
+    }
+
+    private fun dispatchMediaKey(keyCode: Int): Boolean {
+        return try {
+            val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+            val down = KeyEvent(KeyEvent.ACTION_DOWN, keyCode)
+            val up = KeyEvent(KeyEvent.ACTION_UP, keyCode)
+            audio.dispatchMediaKeyEvent(down)
+            audio.dispatchMediaKeyEvent(up)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun swipeShortInternal(next: Boolean): Boolean {
